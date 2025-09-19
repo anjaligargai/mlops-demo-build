@@ -6,7 +6,8 @@ phases:
       python: 3.11
     commands:
       - pip install --upgrade --force-reinstall . "awscli>1.20.30"
-  
+      - pip install --upgrade "sagemaker>=2.150.0"
+      
   build:
     commands:
       - export PYTHONUNBUFFERED=TRUE
