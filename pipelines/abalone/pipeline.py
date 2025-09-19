@@ -68,6 +68,7 @@ def get_pipeline(
     base_job_prefix="",
     sagemaker_project_name=None,
     sagemaker_project_id=None,
+     output_prefix="automl-pipeline"
 ):
     """Builds a SageMaker AutoML pipeline."""
 
