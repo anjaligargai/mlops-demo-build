@@ -61,11 +61,13 @@ def get_pipeline_session(region, default_bucket):
 
 def get_pipeline(
     region,
-    role=None,
-    default_bucket=None,
-    pipeline_name="AutoMLTrainingPipeline",
-    model_package_group_name="AutoMLModelPackageGroup",
-    output_prefix="auto-ml-training",
+    role,
+    default_bucket,
+    pipeline_name,
+    model_package_group_name,
+    base_job_prefix="",
+    sagemaker_project_name=None,
+    sagemaker_project_id=None,
 ):
     """Builds a SageMaker AutoML pipeline."""
 
