@@ -17,7 +17,7 @@ from sagemaker import (
     MetricsSource,
     ModelMetrics,
 )
-
+from sagemaker.workflow.functions import Join
 from sagemaker.processing import ProcessingOutput, ProcessingInput
 from sagemaker.s3 import s3_path_join, S3Downloader, S3Uploader
 from sagemaker.sklearn.processing import SKLearnProcessor
