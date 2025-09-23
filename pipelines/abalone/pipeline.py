@@ -3,7 +3,8 @@ SageMaker AutoML Pipeline for Dine Brands dataset
 
 Process -> AutoML -> Create Model -> Batch Transform -> Evaluate -> Register Model
 """
-
+import subprocess, sys
+subprocess.check_call([sys.executable, "-m", "pip", "install", "scikit-learn==1.3.2"])
 import os
 import json
 import boto3
@@ -16,6 +17,7 @@ from sagemaker import (
     MetricsSource,
     ModelMetrics,
 )
+
 from sagemaker.processing import ProcessingOutput, ProcessingInput
 from sagemaker.s3 import s3_path_join, S3Downloader, S3Uploader
 from sagemaker.sklearn.processing import SKLearnProcessor
