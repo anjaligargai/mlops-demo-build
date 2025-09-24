@@ -5,11 +5,7 @@ Process -> AutoML -> Create Model -> Batch Transform -> Evaluate -> Register Mod
 """
 import subprocess, sys
 subprocess.check_call([sys.executable, "-m", "pip", "install", "scikit-learn==1.3.2"])
-import os
-import json
 import boto3
-import pandas as pd
-import sagemaker
 from sagemaker import (
     AutoML,
     AutoMLInput,
@@ -19,7 +15,6 @@ from sagemaker import (
 )
 from sagemaker.workflow.functions import Join
 from sagemaker.processing import ProcessingOutput, ProcessingInput
-from sagemaker.s3 import s3_path_join, S3Downloader, S3Uploader
 from sagemaker.sklearn.processing import SKLearnProcessor
 from sagemaker.transformer import Transformer
 from sagemaker.workflow.automl_step import AutoMLStep
@@ -88,40 +83,13 @@ def get_pipeline(
     target_attribute_name = ParameterString(name="TargetAttributeName", default_value="customer_churn")
 
     # ----------------------------------------------------------------------
-    # Prepare data
+    # Prepare data (directly from S3)
     # ----------------------------------------------------------------------
 
-    feature_names = [
-        "date", "store_id", "store_name", "city", "state", "store_type",
-        "item_id", "item_name", "category", "price", "quantity_sold",
-        "revenue", "food_cost", "profit", "day_of_week", "month",
-        "quarter", "is_weekend", "is_holiday", "temperature", "is_promotion",
-        "stock_out", "prep_time", "calories", "is_vegetarian",
-    ]
-    column_names = feature_names + [target_attribute_name.default_value]
+    dataset_s3_path = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data/dataset1_30k.csv"
 
-    # Training dataset (local file assumed)
-    dataset_file_name = "dine_brands_demand_100k_with_churn.csv"
-    df = pd.read_csv(dataset_file_name, header=0, names=column_names)
-    df.to_csv("train_val.csv", index=False)
-
-    # Split train/test
-    from sklearn.model_selection import train_test_split
-    train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
-
-    train_df.to_csv("train_val.csv", index=False)
-    test_df[column_names[:-1]].to_csv("x_test.csv", header=False, index=False)
-    test_df[[target_attribute_name.default_value]].to_csv("y_test.csv", header=False, index=False)
-
-    # Upload to S3
-    s3_prefix = s3_path_join("s3://", s3_bucket.default_value, "data")
-    S3Uploader.upload("train_val.csv", s3_prefix, sagemaker_session=pipeline_session)
-    S3Uploader.upload("x_test.csv", s3_prefix, sagemaker_session=pipeline_session)
-    S3Uploader.upload("y_test.csv", s3_prefix, sagemaker_session=pipeline_session)
-
-    s3_train_val = s3_path_join(s3_prefix, "train_val.csv")
-    s3_x_test = s3_path_join(s3_prefix, "x_test.csv")
-    s3_y_test = s3_path_join(s3_prefix, "y_test.csv")
+    # AutoML expects CSV with target column included
+    s3_train_val = dataset_s3_path
 
     # ----------------------------------------------------------------------
     # AutoML training step
@@ -152,8 +120,11 @@ def get_pipeline(
     )
 
     # ----------------------------------------------------------------------
-    # Batch transform
+    # Batch transform (use the same dataset but drop target column for inference)
     # ----------------------------------------------------------------------
+
+    # If you have a pre-split test dataset in S3, replace this path.
+    s3_x_test = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data/dataset1_30k.csv"
 
     transformer = Transformer(
         model_name=step_create_model.properties.ModelName,
@@ -188,7 +159,10 @@ def get_pipeline(
                 source=step_batch_transform.properties.TransformOutput.S3OutputPath,
                 destination="/opt/ml/processing/input/predictions",
             ),
-            ProcessingInput(source=s3_y_test, destination="/opt/ml/processing/input/true_labels"),
+            ProcessingInput(
+                source=s3_x_test,  # reuse same dataset (assumes last column = target)
+                destination="/opt/ml/processing/input/true_labels",
+            ),
         ],
         outputs=[
             ProcessingOutput(
@@ -197,7 +171,7 @@ def get_pipeline(
                 destination=Join(on="/", values=["s3:/", s3_bucket, output_prefix, "evaluation"]),
             ),
         ],
-        code="pipelines/abalone/evalution.py",  # <-- make sure this exists
+        code="pipelines/abalone/evaluate.py",  # <-- evaluation script
     )
     step_evaluation = ProcessingStep(
         name="ModelEvaluationStep",
