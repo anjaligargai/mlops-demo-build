@@ -86,7 +86,7 @@ def get_pipeline(
     # Prepare data (directly from S3)
     # ----------------------------------------------------------------------
 
-    dataset_s3_path = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data/dataset1_30k.csv"
+    dataset_s3_path = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data/dine_brands_demand_100k_with_churn.csv"
 
     # AutoML expects CSV with target column included
     s3_train_val = dataset_s3_path
