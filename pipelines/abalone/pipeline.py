@@ -80,7 +80,7 @@ def get_pipeline(
     s3_bucket = ParameterString(
         name="S3Bucket", default_value=pipeline_session.default_bucket()
     )
-    target_attribute_name = ParameterString(name="TargetAttributeName", default_value="customer_churn")
+    target_attribute_name = ParameterString(name="TargetAttributeName", default_value="customer churn")
 
     # ----------------------------------------------------------------------
     # Prepare data (directly from S3)
