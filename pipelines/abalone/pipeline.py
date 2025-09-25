@@ -29,6 +29,7 @@ from sagemaker.workflow.pipeline_context import PipelineSession
 from sagemaker.workflow.properties import PropertyFile
 from sagemaker.workflow.steps import ProcessingStep, TransformStep
 
+
 # --------------------------------------------------------------------------
 # Helper functions
 # --------------------------------------------------------------------------
@@ -80,7 +81,7 @@ def get_pipeline(
     s3_bucket = ParameterString(
         name="S3Bucket", default_value=pipeline_session.default_bucket()
     )
-    target_attribute_name = ParameterString(name="TargetAttributeName", default_value="customer churn")
+    target_attribute_name = ParameterString(name="TargetAttributeName", default_value="customer_churn")
 
     # ----------------------------------------------------------------------
     # Prepare dataset (read from S3 → split → upload back to S3)
@@ -110,13 +111,23 @@ def get_pipeline(
 
     # Save locally
     train_df.to_csv("train_val.csv", index=False)
-    test_df[column_names[:-1]].to_csv("x_test.csv", header=False, index=False)
-    test_df[[target_attribute_name.default_value]].to_csv("y_test.csv", header=False, index=False)
+    test_df[column_names[:-1]].to_csv("x_test.csv", header=True, index=False)
+    test_df[[target_attribute_name.default_value]].to_csv("y_test.csv", header=True, index=False)
 
     # Upload back to S3
     train_val_s3_key = f"{output_prefix}/prepared/train_val.csv"
     s3.upload_file("train_val.csv", bucket, train_val_s3_key)
     s3_train_val = f"s3://{bucket}/{train_val_s3_key}"
+
+    # Upload test sets into dedicated folders
+    x_test_key = f"{output_prefix}/prepared/x_test/x_test.csv"
+    y_test_key = f"{output_prefix}/prepared/y_test/y_test.csv"
+
+    s3.upload_file("x_test.csv", bucket, x_test_key)
+    s3.upload_file("y_test.csv", bucket, y_test_key)
+
+    s3_x_test_prefix = f"s3://{bucket}/{output_prefix}/prepared/x_test/"
+    s3_y_test_path = f"s3://{bucket}/{y_test_key}"
 
     # ----------------------------------------------------------------------
     # AutoML training step
@@ -146,10 +157,8 @@ def get_pipeline(
     )
 
     # ----------------------------------------------------------------------
-    # Batch transform (using another dataset for inference)
+    # Batch transform (using x_test for inference)
     # ----------------------------------------------------------------------
-    s3_x_test = f"s3://{bucket}/{output_prefix}/prepared/x_test.csv"
-
     transformer = Transformer(
         model_name=step_create_model.properties.ModelName,
         instance_count=instance_count,
@@ -159,7 +168,7 @@ def get_pipeline(
     )
     step_batch_transform = TransformStep(
         name="BatchTransformStep",
-        step_args=transformer.transform(data=s3_x_test, content_type="text/csv"),
+        step_args=transformer.transform(data=s3_x_test_prefix, content_type="text/csv"),
     )
 
     # ----------------------------------------------------------------------
@@ -183,7 +192,7 @@ def get_pipeline(
                 destination="/opt/ml/processing/input/predictions",
             ),
             ProcessingInput(
-                source=f"s3://{bucket}/{output_prefix}/prepared/y_test.csv",
+                source=s3_y_test_path,
                 destination="/opt/ml/processing/input/true_labels",
             ),
         ],
