@@ -230,11 +230,18 @@ def get_pipeline(
         property_files=[evaluation_report],
     )
 
-    cond_f1_retry = ConditionGreaterThanOrEqualTo(
-        left=JsonGet(step_name="ModelEvaluationStepRetry", property_file=evaluation_report,
-                     json_path="classification_metrics.weighted_f1.value"),
-        right=model_registration_metric_threshold,
+    # -------------------------
+    # Condition 1 → Retry if F1 < threshold
+    # -------------------------
+    f1_metric = JsonGet(
+    step=step_evaluation,
+    property_file=evaluation_report,
+    json_path="classification_metrics.weighted_f1.value"
     )
+    
+    # Condition
+    cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
+
 
     # Option 2: new dataset
     new_data_s3 = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data2/dataset2_30k.csv"
