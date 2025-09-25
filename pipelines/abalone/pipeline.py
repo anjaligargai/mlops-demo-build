@@ -170,13 +170,14 @@ def get_pipeline(
     # -------------------------
     # Condition 1 → Retry if F1 < threshold
     # -------------------------
-    cond_f1_first = ConditionGreaterThanOrEqualTo(
-        left = JsonGet(
-        step=step_evaluation,  # directly pass the ProcessingStep object
-        property_file=evaluation_report,
-        json_path="classification_metrics.weighted_f1.value"
+    f1_metric = JsonGet(
+    step=step_evaluation,
+    property_file=evaluation_report,
+    json_path="classification_metrics.weighted_f1.value"
     )
-    )
+    
+    # Condition
+    cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
 
     # Retry AutoML with different params (Option 1)
     automl_retry = AutoML(
