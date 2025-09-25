@@ -55,6 +55,7 @@ def get_pipeline(
     model_package_group_name="AutoMLModelPackageGroup",
     output_prefix="dine-auto-ml-training",
     base_job_prefix="dine-auto-ml",
+    sagemaker_project_name="dine_demo_mlops"
 ):
     """
     Builds a SageMaker AutoML pipeline for Dine Brands dataset.
