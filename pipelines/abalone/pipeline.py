@@ -147,7 +147,7 @@ def get_pipeline(
 
     # y_test: true labels (we keep header so evaluation code can parse it easily)
     y_test_df = test_df[[target_col]]
-    y_test_df.to_csv("y_test.csv", index=False, header=True)
+    y_test_df.to_csv("y_test.csv", index=False, header=False)
 
     # -------------------------
     # Upload prepared files back to S3 under output_prefix
