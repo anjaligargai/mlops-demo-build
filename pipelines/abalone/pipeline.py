@@ -1,11 +1,15 @@
 """
 SageMaker AutoML Pipeline for Dine Brands dataset
-
 Process -> AutoML -> Create Model -> Batch Transform -> Evaluate -> Register Model
 """
 import subprocess, sys
 subprocess.check_call([sys.executable, "-m", "pip", "install", "scikit-learn==1.3.2"])
+
 import boto3
+import pandas as pd
+from io import StringIO
+from sklearn.model_selection import train_test_split
+
 from sagemaker import (
     AutoML,
     AutoMLInput,
@@ -25,19 +29,16 @@ from sagemaker.workflow.pipeline_context import PipelineSession
 from sagemaker.workflow.properties import PropertyFile
 from sagemaker.workflow.steps import ProcessingStep, TransformStep
 
-
 # --------------------------------------------------------------------------
 # Helper functions
 # --------------------------------------------------------------------------
 
 def get_sagemaker_client(region):
-    """Gets the sagemaker client."""
     boto_session = boto3.Session(region_name=region)
     return boto_session.client("sagemaker")
 
 
 def get_pipeline_session(region, default_bucket):
-    """Gets the pipeline session based on the region."""
     boto_session = boto3.Session(region_name=region)
     sagemaker_client = boto_session.client("sagemaker")
     return PipelineSession(
@@ -62,7 +63,6 @@ def get_pipeline(
     sagemaker_project_id=None,
     output_prefix="dine-auto-ml-training",
 ):
-    """Builds a SageMaker AutoML pipeline for Dine Brands dataset."""
 
     pipeline_session = get_pipeline_session(region, default_bucket)
 
@@ -75,7 +75,7 @@ def get_pipeline(
     max_automl_runtime = ParameterInteger(name="MaxAutoMLRuntime", default_value=3600)
     model_approval_status = ParameterString(name="ModelApprovalStatus", default_value="Approved")
     model_registration_metric_threshold = ParameterFloat(
-        name="ModelRegistrationMetricThreshold", default_value=0.2
+        name="ModelRegistrationMetricThreshold", default_value=0.8
     )
     s3_bucket = ParameterString(
         name="S3Bucket", default_value=pipeline_session.default_bucket()
@@ -83,27 +83,53 @@ def get_pipeline(
     target_attribute_name = ParameterString(name="TargetAttributeName", default_value="customer churn")
 
     # ----------------------------------------------------------------------
-    # Prepare data (directly from S3)
+    # Prepare dataset (read from S3 → split → upload back to S3)
     # ----------------------------------------------------------------------
+    raw_dataset_path = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data/dataset1_30k.csv"
 
-    dataset_s3_path = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data/dine_brands_demand_100k_with_churn.csv"
+    # Parse bucket/key
+    bucket = raw_dataset_path.split("/")[2]
+    key = "/".join(raw_dataset_path.split("/")[3:])
 
-    # AutoML expects CSV with target column included
-    s3_train_val = dataset_s3_path
+    s3 = boto3.client("s3")
+    obj = s3.get_object(Bucket=bucket, Key=key)
+    df = pd.read_csv(StringIO(obj["Body"].read().decode("utf-8")))
+
+    feature_names = [
+        "date", "store_id", "store_name", "city", "state", "store_type",
+        "item_id", "item_name", "category", "price", "quantity_sold",
+        "revenue", "food_cost", "profit", "day_of_week", "month",
+        "quarter", "is_weekend", "is_holiday", "temperature", "is_promotion",
+        "stock_out", "prep_time", "calories", "is_vegetarian",
+    ]
+    column_names = feature_names + [target_attribute_name.default_value]
+    df.columns = column_names
+
+    # Train/test split
+    train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
+
+    # Save locally
+    train_df.to_csv("train_val.csv", index=False)
+    test_df[column_names[:-1]].to_csv("x_test.csv", header=False, index=False)
+    test_df[[target_attribute_name.default_value]].to_csv("y_test.csv", header=False, index=False)
+
+    # Upload back to S3
+    train_val_s3_key = f"{output_prefix}/prepared/train_val.csv"
+    s3.upload_file("train_val.csv", bucket, train_val_s3_key)
+    s3_train_val = f"s3://{bucket}/{train_val_s3_key}"
 
     # ----------------------------------------------------------------------
     # AutoML training step
     # ----------------------------------------------------------------------
-
     automl = AutoML(
         role=role,
-        target_attribute_name=target_attribute_name,
+        target_attribute_name=target_attribute_name.default_value,
         sagemaker_session=pipeline_session,
         total_job_runtime_in_seconds=max_automl_runtime,
         mode="ENSEMBLING",
     )
     train_args = automl.fit(
-        inputs=[AutoMLInput(inputs=s3_train_val, target_attribute_name=target_attribute_name)]
+        inputs=[AutoMLInput(inputs=s3_train_val, target_attribute_name=target_attribute_name.default_value)]
     )
 
     step_auto_ml_training = AutoMLStep(
@@ -120,11 +146,9 @@ def get_pipeline(
     )
 
     # ----------------------------------------------------------------------
-    # Batch transform (use the same dataset but drop target column for inference)
+    # Batch transform (using another dataset for inference)
     # ----------------------------------------------------------------------
-
-    # If you have a pre-split test dataset in S3, replace this path.
-    s3_x_test = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data/dataset1_30k.csv"
+    s3_x_test = f"s3://{bucket}/{output_prefix}/prepared/x_test.csv"
 
     transformer = Transformer(
         model_name=step_create_model.properties.ModelName,
@@ -141,7 +165,6 @@ def get_pipeline(
     # ----------------------------------------------------------------------
     # Model evaluation
     # ----------------------------------------------------------------------
-
     evaluation_report = PropertyFile(
         name="evaluation", output_name="evaluation_metrics", path="evaluation_metrics.json"
     )
@@ -160,7 +183,7 @@ def get_pipeline(
                 destination="/opt/ml/processing/input/predictions",
             ),
             ProcessingInput(
-                source=s3_x_test,  # reuse same dataset (assumes last column = target)
+                source=f"s3://{bucket}/{output_prefix}/prepared/y_test.csv",
                 destination="/opt/ml/processing/input/true_labels",
             ),
         ],
@@ -171,7 +194,7 @@ def get_pipeline(
                 destination=Join(on="/", values=["s3:/", s3_bucket, output_prefix, "evaluation"]),
             ),
         ],
-        code="pipelines/abalone/evaluate.py",  # <-- evaluation script
+        code="pipelines/abalone/evaluate.py",
     )
     step_evaluation = ProcessingStep(
         name="ModelEvaluationStep",
@@ -182,7 +205,6 @@ def get_pipeline(
     # ----------------------------------------------------------------------
     # Register model
     # ----------------------------------------------------------------------
-
     model_metrics = ModelMetrics(
         model_statistics=MetricsSource(
             s3_uri=step_auto_ml_training.properties.BestCandidateProperties.ModelInsightsJsonReportPath,
@@ -210,7 +232,6 @@ def get_pipeline(
     # ----------------------------------------------------------------------
     # Pipeline assembly
     # ----------------------------------------------------------------------
-
     pipeline = Pipeline(
         name=pipeline_name,
         parameters=[
@@ -218,7 +239,6 @@ def get_pipeline(
             instance_type,
             max_automl_runtime,
             model_approval_status,
-            model_package_group_name,
             model_registration_metric_threshold,
             s3_bucket,
             target_attribute_name,
