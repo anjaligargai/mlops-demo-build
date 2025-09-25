@@ -231,7 +231,7 @@ def get_pipeline(
     )
 
     # -------------------------
-    # Condition 1 → Retry if F1 < threshold
+    # Condition 2 → Retry if F1 < threshold
     # -------------------------
     f1_metric = JsonGet(
     step=step_evaluation,
@@ -240,7 +240,7 @@ def get_pipeline(
     )
     
     # Condition
-    cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
+    cond_f1_retry = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
 
 
     # Option 2: new dataset
