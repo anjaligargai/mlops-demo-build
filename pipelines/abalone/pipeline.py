@@ -27,7 +27,9 @@ from sagemaker.workflow.pipeline import Pipeline
 from sagemaker.workflow.pipeline_context import PipelineSession
 from sagemaker.workflow.properties import PropertyFile
 from sagemaker.workflow.steps import ProcessingStep, TransformStep
-from sagemaker.workflow.conditions import ConditionStep, ConditionGreaterThanOrEqualTo
+from sagemaker.workflow.conditions import ConditionGreaterThanOrEqualTo
+from sagemaker.workflow.condition_step import ConditionStep
+from sagemaker.workflow.functions import JsonGet
 from sagemaker.workflow.condition_step import JsonGet
 
 # --------------------------------------------------------------------------
