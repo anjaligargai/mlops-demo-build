@@ -2,6 +2,10 @@
 SageMaker AutoML Pipeline for Dine Brands dataset
 Process -> AutoML -> Create Model -> Batch Transform -> Evaluate -> Register Model
 """
+# preprocess.py
+import subprocess, sys
+subprocess.check_call([sys.executable, "-m", "pip", "install", "scikit-learn", "--quiet"])
+
 import boto3
 import pandas as pd
 from io import StringIO
