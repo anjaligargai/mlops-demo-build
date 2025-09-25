@@ -228,7 +228,7 @@ def get_pipeline(
                 destination=Join(on="/", values=["s3:/", s3_bucket_param, output_prefix, "evaluation"]),
             ),
         ],
-        code="pipelines/abalone/evaluate.py",  # <- ensure this script exists and reads the above paths
+        code="pipelines/abalone/evalution.py",  # <- ensure this script exists and reads the above paths
     )
 
     step_evaluation = ProcessingStep(name="ModelEvaluationStep", step_args=step_args_sklearn_processor, property_files=[evaluation_report])
