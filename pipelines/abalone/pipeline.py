@@ -144,7 +144,19 @@ def get_pipeline(
     )
 
     # evaluation
-    evaluation_report = PropertyFile(name="evaluation", output_name="evaluation_metrics", path="evaluation_metrics.json")
+    evaluation_report_first = PropertyFile(
+    name="evaluation_first", 
+    output_name="evaluation_metrics", 
+    path="evaluation_metrics.json"
+    )
+    
+    # Evaluation report for retry AutoML run
+    evaluation_report_retry = PropertyFile(
+        name="evaluation_retry", 
+        output_name="evaluation_metrics", 
+        path="evaluation_metrics.json"
+    )
+
     sklearn_processor = SKLearnProcessor(
     role=role,
     framework_version="1.0-1",
@@ -182,7 +194,7 @@ def get_pipeline(
             ],
             code="pipelines/abalone/evalution.py",
         ),
-        property_files=[evaluation_report],
+        property_files=[evaluation_report_first],
     )
 
     # -------------------------
@@ -190,7 +202,7 @@ def get_pipeline(
     # -------------------------
     f1_metric = JsonGet(
         step=step_evaluation,
-        property_file=evaluation_report,
+        property_file=evaluation_report_first,
         json_path="classification_metrics.weighted_f1.value"
     )
     cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
@@ -256,7 +268,7 @@ def get_pipeline(
             ],
             code="pipelines/abalone/evalution.py",
         ),
-        property_files=[evaluation_report],
+        property_files=[evaluation_report_retry],
     )
 
     # -------------------------
@@ -264,7 +276,7 @@ def get_pipeline(
     # -------------------------
     f1_metric_retry = JsonGet(
         step=step_eval_retry,
-        property_file=evaluation_report,
+        property_file=evaluation_report_retry,
         json_path="classification_metrics.weighted_f1.value"
     )
     cond_f1_retry = ConditionGreaterThanOrEqualTo(f1_metric_retry, 0.8)
