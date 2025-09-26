@@ -116,17 +116,15 @@ def get_pipeline(
     # -------------------------
     # Step 1: AutoML training
     # -------------------------
-    automl_job_config = AutoMLJobConfig(
-    mode="ENSEMBLING"   # Required field
-    )
     
     automl = AutoML(
         role=role,
         target_attribute_name=target_col,
         sagemaker_session=pipeline_session,
         total_job_runtime_in_seconds=max_automl_runtime,
-        auto_ml_job_config=automl_job_config
+        mode="ENSEMBLING" 
     )
+    
     step_auto_ml_training = AutoMLStep(
         name="AutoMLTrainingStep",
         step_args=automl.fit(inputs=[AutoMLInput(inputs=s3_train_val, target_attribute_name=target_col)])
@@ -184,17 +182,12 @@ def get_pipeline(
     # Condition
     cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
 
-    # Retry AutoML with different params (Option 1)
-    automl_job_config = AutoMLJobConfig(
-    mode="ENSEMBLING"   # Required field
-    )
-    
     automl = AutoML(
         role=role,
         target_attribute_name=target_col,
         sagemaker_session=pipeline_session,
         total_job_runtime_in_seconds=max_automl_runtime,
-        auto_ml_job_config=automl_job_config
+        mode="ENSEMBLING",
     )
     
     step_automl_retry = AutoMLStep(
