@@ -13,7 +13,6 @@ import boto3
 import pandas as pd
 from io import StringIO
 from sklearn.model_selection import train_test_split
-from sagemaker.automl.automl import AutoMLJobConfig
 from sagemaker import AutoML, AutoMLInput, get_execution_role
 from sagemaker import MetricsSource, ModelMetrics
 from sagemaker.workflow.functions import Join
