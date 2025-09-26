@@ -146,25 +146,41 @@ def get_pipeline(
     # evaluation
     evaluation_report = PropertyFile(name="evaluation", output_name="evaluation_metrics", path="evaluation_metrics.json")
     sklearn_processor = SKLearnProcessor(
-        role=role, framework_version="1.0-1",
-        instance_count=instance_count, instance_type=instance_type.default_value,
-        sagemaker_session=pipeline_session,
+    role=role,
+    framework_version="1.0-1",
+    instance_count=instance_count,
+    instance_type=instance_type.default_value,
+    sagemaker_session=pipeline_session,
+    env={   # ✅ set env vars here
+            "MLFLOW_RUN_NAME": "AutoML_Evaluation_Initial",
+            "DATASET_VERSION": "dataset1"
+        }
     )
+
     step_evaluation = ProcessingStep(
-        name="ModelEvaluationStep",
-        step_args=sklearn_processor.run(
-            inputs=[
-                ProcessingInput(source=step_batch_transform.properties.TransformOutput.S3OutputPath,
-                                destination="/opt/ml/processing/input/predictions"),
-                ProcessingInput(source=s3_y_test, destination="/opt/ml/processing/input/true_labels"),
+    name="ModelEvaluationStep",
+    step_args=sklearn_processor.run(
+        inputs=[
+            ProcessingInput(
+                source=step_batch_transform.properties.TransformOutput.S3OutputPath,
+                destination="/opt/ml/processing/input/predictions",
+            ),
+            ProcessingInput(
+                source=s3_y_test,
+                destination="/opt/ml/processing/input/true_labels",
+            ),
+        ],
+        outputs=[
+                ProcessingOutput(
+                    output_name="evaluation_metrics",
+                    source="/opt/ml/processing/evaluation",
+                    destination=Join(
+                        on="/",
+                        values=["s3:/", s3_bucket_param, output_prefix, "evaluation"],
+                    ),
+                )
             ],
-            outputs=[ProcessingOutput(output_name="evaluation_metrics", source="/opt/ml/processing/evaluation",
-                                      destination=Join(on="/", values=["s3:/", s3_bucket_param, output_prefix, "evaluation"]))],
             code="pipelines/abalone/evaluation.py",
-            environment={
-                "MLFLOW_RUN_NAME": "AutoML_Evaluation_Initial",
-                "DATASET_VERSION": "dataset1"
-            }
         ),
         property_files=[evaluation_report],
     )
@@ -216,20 +232,29 @@ def get_pipeline(
         step_args=transformer_retry.transform(data=s3_x_test_prefix, content_type="text/csv"),
     )
     step_eval_retry = ProcessingStep(
-        name="ModelEvaluationStepRetry",
-        step_args=sklearn_processor.run(
-            inputs=[
-                ProcessingInput(source=step_batch_transform_retry.properties.TransformOutput.S3OutputPath,
-                                destination="/opt/ml/processing/input/predictions"),
-                ProcessingInput(source=s3_y_test, destination="/opt/ml/processing/input/true_labels"),
+    name="ModelEvaluationStepRetry",
+    step_args=sklearn_processor.run(
+        inputs=[
+            ProcessingInput(
+                source=step_batch_transform_retry.properties.TransformOutput.S3OutputPath,
+                destination="/opt/ml/processing/input/predictions",
+            ),
+            ProcessingInput(
+                source=s3_y_test,
+                destination="/opt/ml/processing/input/true_labels",
+            ),
+        ],
+        outputs=[
+                ProcessingOutput(
+                    output_name="evaluation_metrics",
+                    source="/opt/ml/processing/evaluation",
+                    destination=Join(
+                        on="/",
+                        values=["s3:/", s3_bucket_param, output_prefix, "evaluation_retry"],
+                    ),
+                )
             ],
-            outputs=[ProcessingOutput(output_name="evaluation_metrics", source="/opt/ml/processing/evaluation",
-                                      destination=Join(on="/", values=["s3:/", s3_bucket_param, output_prefix, "evaluation_retry"]))],
             code="pipelines/abalone/evaluation.py",
-            environment={
-                "MLFLOW_RUN_NAME": "AutoML_Evaluation_Retry",
-                "DATASET_VERSION": "dataset1_retry"
-            }
         ),
         property_files=[evaluation_report],
     )
