@@ -13,7 +13,7 @@ import boto3
 import pandas as pd
 from io import StringIO
 from sklearn.model_selection import train_test_split
-
+from sagemaker.automl.automl import AutoMLJobConfig
 from sagemaker import AutoML, AutoMLInput, get_execution_role
 from sagemaker import MetricsSource, ModelMetrics
 from sagemaker.workflow.functions import Join
@@ -32,7 +32,7 @@ from sagemaker.workflow.condition_step import ConditionStep
 from sagemaker.workflow.functions import JsonGet
 from sagemaker.workflow.condition_step import JsonGet
 from sagemaker.automl.automl import AutoML
-from sagemaker.automl.automl import AutoMLJobConfig
+
 # --------------------------------------------------------------------------
 # Helper
 # --------------------------------------------------------------------------
