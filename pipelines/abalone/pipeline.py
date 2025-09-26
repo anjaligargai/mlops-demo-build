@@ -143,16 +143,10 @@ def get_pipeline(
         name="BatchTransformStep", step_args=transformer.transform(data=s3_x_test_prefix, content_type="text/csv")
     )
 
-    evaluation_report_first = PropertyFile(
-        name="EvalReportFirst",
-        output_name="evaluation_metrics",
-        path="evaluation_metrics.json"
-    )
-    
-    evaluation_report_retry = PropertyFile(
-        name="EvalReportRetry",
-        output_name="evaluation_metrics",
-        path="evaluation_metrics.json"
+    evaluation_report_initial = PropertyFile(
+    name="EvalReportInitial",
+    output_name="evaluation_metrics",
+    path="evaluation_metrics.json"
     )
 
     sklearn_processor = SKLearnProcessor(
@@ -192,17 +186,18 @@ def get_pipeline(
             ],
             code="pipelines/abalone/evalution.py",
         ),
-        property_files=[evaluation_report_first],
+        property_files=[evaluation_report_initial],
     )
 
     # -------------------------
     # Condition 1 → Retry if F1 < threshold
     # -------------------------
-    f1_metric = JsonGet(
-        step=step_evaluation.name,
-        property_file=evaluation_report_first,
-        json_path="classification_metrics.weighted_f1.value"
+    f1_metric_initial = JsonGet(
+    step=step_evaluation,
+    property_file=evaluation_report_initial,
+    json_path="classification_metrics.weighted_f1.value"
     )
+    
     cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
 
     automl_retry = AutoML(
@@ -241,6 +236,13 @@ def get_pipeline(
         name="BatchTransformStepRetry",
         step_args=transformer_retry.transform(data=s3_x_test_prefix, content_type="text/csv"),
     )
+
+    evaluation_report_retry = PropertyFile(
+    name="EvalReportRetry",
+    output_name="evaluation_metrics",
+    path="evaluation_metrics.json"
+    )
+
     step_eval_retry = ProcessingStep(
     name="ModelEvaluationStepRetry",
     step_args=sklearn_processor.run(
@@ -273,10 +275,11 @@ def get_pipeline(
     # Condition 2 → Retry if F1 < threshold
     # -------------------------
     f1_metric_retry = JsonGet(
-        step=step_eval_retry.name,
-        property_file=evaluation_report_retry,
-        json_path="classification_metrics.weighted_f1.value"
+    step=step_eval_retry,
+    property_file=evaluation_report_retry,
+    json_path="classification_metrics.weighted_f1.value"
     )
+    
     cond_f1_retry = ConditionGreaterThanOrEqualTo(f1_metric_retry, 0.8)
 
     # Option 2: new dataset retrain
