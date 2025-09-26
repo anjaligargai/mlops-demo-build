@@ -181,7 +181,7 @@ def get_pipeline(
     # Condition
     cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
 
-    automl = AutoML(
+    automl_retry = AutoML(
         role=role,
         target_attribute_name=target_col,
         sagemaker_session=pipeline_session,
