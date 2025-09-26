@@ -180,7 +180,7 @@ def get_pipeline(
                     ),
                 )
             ],
-            code="pipelines/abalone/evaluation.py",
+            code="pipelines/abalone/evalution.py",
         ),
         property_files=[evaluation_report],
     )
@@ -254,7 +254,7 @@ def get_pipeline(
                     ),
                 )
             ],
-            code="pipelines/abalone/evaluation.py",
+            code="pipelines/abalone/evalution.py",
         ),
         property_files=[evaluation_report],
     )
