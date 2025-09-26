@@ -198,7 +198,7 @@ def get_pipeline(
     json_path="classification_metrics.weighted_f1.value"
     )
     
-    cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
+    cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric_initial, 0.8)
 
     automl_retry = AutoML(
         role=role,
@@ -274,6 +274,7 @@ def get_pipeline(
     # -------------------------
     # Condition 2 → Retry if F1 < threshold
     # -------------------------
+    
     f1_metric_retry = JsonGet(
     step=step_eval_retry,
     property_file=evaluation_report_retry,
