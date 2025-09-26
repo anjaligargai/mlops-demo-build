@@ -1,5 +1,5 @@
 """
-SageMaker AutoML Pipeline for Dine Brands dataset
+SageMaker AutoML Pipeline for Dine Brands dataset with MLflow tracking
 Process -> AutoML -> Create Model -> Batch Transform -> Evaluate -> Condition
 Condition: if F1 >= threshold → Register
 Else → Retry AutoML with different config
@@ -29,7 +29,6 @@ from sagemaker.workflow.steps import ProcessingStep, TransformStep
 from sagemaker.workflow.conditions import ConditionGreaterThanOrEqualTo
 from sagemaker.workflow.condition_step import ConditionStep
 from sagemaker.workflow.functions import JsonGet
-from sagemaker.workflow.condition_step import JsonGet
 from sagemaker.automl.automl import AutoML
 
 # --------------------------------------------------------------------------
@@ -115,7 +114,6 @@ def get_pipeline(
     # -------------------------
     # Step 1: AutoML training
     # -------------------------
-    
     automl = AutoML(
         role=role,
         target_attribute_name=target_col,
@@ -160,11 +158,13 @@ def get_pipeline(
                                 destination="/opt/ml/processing/input/predictions"),
                 ProcessingInput(source=s3_y_test, destination="/opt/ml/processing/input/true_labels"),
             ],
-            outputs=[
-                ProcessingOutput(output_name="evaluation_metrics", source="/opt/ml/processing/evaluation",
-                                 destination=Join(on="/", values=["s3:/", s3_bucket_param, output_prefix, "evaluation"]))
-            ],
-            code="pipelines/abalone/evalution.py",
+            outputs=[ProcessingOutput(output_name="evaluation_metrics", source="/opt/ml/processing/evaluation",
+                                      destination=Join(on="/", values=["s3:/", s3_bucket_param, output_prefix, "evaluation"]))],
+            code="pipelines/abalone/evaluation.py",
+            environment={
+                "MLFLOW_RUN_NAME": "AutoML_Evaluation_Initial",
+                "DATASET_VERSION": "dataset1"
+            }
         ),
         property_files=[evaluation_report],
     )
@@ -173,12 +173,10 @@ def get_pipeline(
     # Condition 1 → Retry if F1 < threshold
     # -------------------------
     f1_metric = JsonGet(
-    step=step_evaluation,
-    property_file=evaluation_report,
-    json_path="classification_metrics.weighted_f1.value"
+        step=step_evaluation,
+        property_file=evaluation_report,
+        json_path="classification_metrics.weighted_f1.value"
     )
-    
-    # Condition
     cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
 
     automl_retry = AutoML(
@@ -227,7 +225,11 @@ def get_pipeline(
             ],
             outputs=[ProcessingOutput(output_name="evaluation_metrics", source="/opt/ml/processing/evaluation",
                                       destination=Join(on="/", values=["s3:/", s3_bucket_param, output_prefix, "evaluation_retry"]))],
-            code="pipelines/abalone/evalution.py",
+            code="pipelines/abalone/evaluation.py",
+            environment={
+                "MLFLOW_RUN_NAME": "AutoML_Evaluation_Retry",
+                "DATASET_VERSION": "dataset1_retry"
+            }
         ),
         property_files=[evaluation_report],
     )
@@ -235,17 +237,14 @@ def get_pipeline(
     # -------------------------
     # Condition 2 → Retry if F1 < threshold
     # -------------------------
-    f1_metric = JsonGet(
-    step=step_evaluation,
-    property_file=evaluation_report,
-    json_path="classification_metrics.weighted_f1.value"
+    f1_metric_retry = JsonGet(
+        step=step_eval_retry,
+        property_file=evaluation_report,
+        json_path="classification_metrics.weighted_f1.value"
     )
-    
-    # Condition
-    cond_f1_retry = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
+    cond_f1_retry = ConditionGreaterThanOrEqualTo(f1_metric_retry, 0.8)
 
-
-    # Option 2: new dataset
+    # Option 2: new dataset retrain
     new_data_s3 = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data2/dataset2_30k.csv"
     automl_new_data = AutoML(
         role=role, target_attribute_name=target_col, sagemaker_session=pipeline_session,
