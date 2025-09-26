@@ -143,17 +143,15 @@ def get_pipeline(
         name="BatchTransformStep", step_args=transformer.transform(data=s3_x_test_prefix, content_type="text/csv")
     )
 
-    # evaluation
     evaluation_report_first = PropertyFile(
-    name="evaluation_first", 
-    output_name="evaluation_metrics", 
-    path="evaluation_metrics.json"
+        name="EvalReportFirst",
+        output_name="evaluation_metrics",
+        path="evaluation_metrics.json"
     )
     
-    # Evaluation report for retry AutoML run
     evaluation_report_retry = PropertyFile(
-        name="evaluation_retry", 
-        output_name="evaluation_metrics", 
+        name="EvalReportRetry",
+        output_name="evaluation_metrics",
         path="evaluation_metrics.json"
     )
 
@@ -201,7 +199,7 @@ def get_pipeline(
     # Condition 1 → Retry if F1 < threshold
     # -------------------------
     f1_metric = JsonGet(
-        step=step_evaluation,
+        step=step_evaluation.name,
         property_file=evaluation_report_first,
         json_path="classification_metrics.weighted_f1.value"
     )
@@ -275,7 +273,7 @@ def get_pipeline(
     # Condition 2 → Retry if F1 < threshold
     # -------------------------
     f1_metric_retry = JsonGet(
-        step=step_eval_retry,
+        step=step_eval_retry.name,
         property_file=evaluation_report_retry,
         json_path="classification_metrics.weighted_f1.value"
     )
