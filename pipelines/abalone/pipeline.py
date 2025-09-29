@@ -1,5 +1,5 @@
 """
-SageMaker AutoML Pipeline for Dine Brands dataset with MLflow tracking
+SageMaker AutoML Pipeline for Dine Brands dataset
 Process -> AutoML -> Create Model -> Batch Transform -> Evaluate -> Condition
 Condition: if F1 >= threshold → Register
 Else → Retry AutoML with different config
@@ -29,6 +29,7 @@ from sagemaker.workflow.steps import ProcessingStep, TransformStep
 from sagemaker.workflow.conditions import ConditionGreaterThanOrEqualTo
 from sagemaker.workflow.condition_step import ConditionStep
 from sagemaker.workflow.functions import JsonGet
+from sagemaker.workflow.condition_step import JsonGet
 from sagemaker.automl.automl import AutoML
 
 # --------------------------------------------------------------------------
@@ -114,6 +115,7 @@ def get_pipeline(
     # -------------------------
     # Step 1: AutoML training
     # -------------------------
+    
     automl = AutoML(
         role=role,
         target_attribute_name=target_col,
@@ -143,62 +145,41 @@ def get_pipeline(
         name="BatchTransformStep", step_args=transformer.transform(data=s3_x_test_prefix, content_type="text/csv")
     )
 
-    evaluation_report_initial = PropertyFile(
-    name="EvalReportInitial",
-    output_name="evaluation_metrics",
-    path="evaluation_metrics.json"
-    )
-
+    # evaluation
+    evaluation_report = PropertyFile(name="evaluation", output_name="evaluation_metrics", path="evaluation_metrics.json")
     sklearn_processor = SKLearnProcessor(
-    role=role,
-    framework_version="1.0-1",
-    instance_count=instance_count,
-    instance_type=instance_type.default_value,
-    sagemaker_session=pipeline_session,
-    env={   # ✅ set env vars here
-            "MLFLOW_RUN_NAME": "AutoML_Evaluation_Initial",
-            "DATASET_VERSION": "dataset1"
-        }
+        role=role, framework_version="1.0-1",
+        instance_count=instance_count, instance_type=instance_type.default_value,
+        sagemaker_session=pipeline_session,
     )
-
     step_evaluation = ProcessingStep(
-    name="ModelEvaluationStep",
-    step_args=sklearn_processor.run(
-        inputs=[
-            ProcessingInput(
-                source=step_batch_transform.properties.TransformOutput.S3OutputPath,
-                destination="/opt/ml/processing/input/predictions",
-            ),
-            ProcessingInput(
-                source=s3_y_test,
-                destination="/opt/ml/processing/input/true_labels",
-            ),
-        ],
-        outputs=[
-                ProcessingOutput(
-                    output_name="evaluation_metrics",
-                    source="/opt/ml/processing/evaluation",
-                    destination=Join(
-                        on="/",
-                        values=["s3:/", s3_bucket_param, output_prefix, "evaluation"],
-                    ),
-                )
+        name="ModelEvaluationStep",
+        step_args=sklearn_processor.run(
+            inputs=[
+                ProcessingInput(source=step_batch_transform.properties.TransformOutput.S3OutputPath,
+                                destination="/opt/ml/processing/input/predictions"),
+                ProcessingInput(source=s3_y_test, destination="/opt/ml/processing/input/true_labels"),
+            ],
+            outputs=[
+                ProcessingOutput(output_name="evaluation_metrics", source="/opt/ml/processing/evaluation",
+                                 destination=Join(on="/", values=["s3:/", s3_bucket_param, output_prefix, "evaluation"]))
             ],
             code="pipelines/abalone/evalution.py",
         ),
-        property_files=[evaluation_report_initial],
+        property_files=[evaluation_report],
     )
 
     # -------------------------
     # Condition 1 → Retry if F1 < threshold
     # -------------------------
-    f1_metric_initial = JsonGet(
+    f1_metric = JsonGet(
     step=step_evaluation,
-    property_file=evaluation_report_initial,
+    property_file=evaluation_report,
     json_path="classification_metrics.weighted_f1.value"
     )
     
-    cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric_initial, 0.8)
+    # Condition
+    cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
 
     automl_retry = AutoML(
         role=role,
@@ -236,54 +217,35 @@ def get_pipeline(
         name="BatchTransformStepRetry",
         step_args=transformer_retry.transform(data=s3_x_test_prefix, content_type="text/csv"),
     )
-
-    evaluation_report_retry = PropertyFile(
-    name="EvalReportRetry",
-    output_name="evaluation_metrics",
-    path="evaluation_metrics.json"
-    )
-
     step_eval_retry = ProcessingStep(
-    name="ModelEvaluationStepRetry",
-    step_args=sklearn_processor.run(
-        inputs=[
-            ProcessingInput(
-                source=step_batch_transform_retry.properties.TransformOutput.S3OutputPath,
-                destination="/opt/ml/processing/input/predictions",
-            ),
-            ProcessingInput(
-                source=s3_y_test,
-                destination="/opt/ml/processing/input/true_labels",
-            ),
-        ],
-        outputs=[
-                ProcessingOutput(
-                    output_name="evaluation_metrics",
-                    source="/opt/ml/processing/evaluation",
-                    destination=Join(
-                        on="/",
-                        values=["s3:/", s3_bucket_param, output_prefix, "evaluation_retry"],
-                    ),
-                )
+        name="ModelEvaluationStepRetry",
+        step_args=sklearn_processor.run(
+            inputs=[
+                ProcessingInput(source=step_batch_transform_retry.properties.TransformOutput.S3OutputPath,
+                                destination="/opt/ml/processing/input/predictions"),
+                ProcessingInput(source=s3_y_test, destination="/opt/ml/processing/input/true_labels"),
             ],
+            outputs=[ProcessingOutput(output_name="evaluation_metrics", source="/opt/ml/processing/evaluation",
+                                      destination=Join(on="/", values=["s3:/", s3_bucket_param, output_prefix, "evaluation_retry"]))],
             code="pipelines/abalone/evalution.py",
         ),
-        property_files=[evaluation_report_retry],
+        property_files=[evaluation_report],
     )
 
     # -------------------------
     # Condition 2 → Retry if F1 < threshold
     # -------------------------
-    
-    f1_metric_retry = JsonGet(
-    step=step_eval_retry,
-    property_file=evaluation_report_retry,
+    f1_metric = JsonGet(
+    step=step_evaluation,
+    property_file=evaluation_report,
     json_path="classification_metrics.weighted_f1.value"
     )
     
-    cond_f1_retry = ConditionGreaterThanOrEqualTo(f1_metric_retry, 0.8)
+    # Condition
+    cond_f1_retry = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
 
-    # Option 2: new dataset retrain
+
+    # Option 2: new dataset
     new_data_s3 = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data2/dataset2_30k.csv"
     automl_new_data = AutoML(
         role=role, target_attribute_name=target_col, sagemaker_session=pipeline_session,
