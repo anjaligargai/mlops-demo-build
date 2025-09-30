@@ -52,8 +52,8 @@ def get_pipeline(
     pipeline_name="DineAutoMLTrainingPipeline",
     model_package_group_name="AutoMLModelPackageGroup",
     output_prefix="dine-auto-ml-training",
-    base_job_prefix="dine_demo",
-    sagemaker_project_name="dine_demo"
+    base_job_prefix="mlops_dine_demo",
+    sagemaker_project_name="mlops_dine_demo"
 ):
 
     pipeline_session = get_pipeline_session(region, default_bucket)
