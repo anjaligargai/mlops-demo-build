@@ -74,7 +74,7 @@ def get_pipeline(
     # -------------------------
     # Dataset 1 (base dataset)
     # -------------------------
-    raw_dataset_s3 = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data/dataset1_30k.csv"
+    raw_dataset_s3 = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data/dataset1_20k.csv"
     bucket = raw_dataset_s3.split("/")[2]
     key = "/".join(raw_dataset_s3.split("/")[3:])
 
@@ -246,7 +246,7 @@ def get_pipeline(
 
 
     # Option 2: new dataset
-    new_data_s3 = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data2/dataset2_30k.csv"
+    new_data_s3 = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data/dataset1_10k.csv"
     automl_new_data = AutoML(
         role=role, target_attribute_name=target_col, sagemaker_session=pipeline_session,
         total_job_runtime_in_seconds=7200, mode="ENSEMBLING"
