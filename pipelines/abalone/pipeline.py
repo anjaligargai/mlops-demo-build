@@ -26,7 +26,7 @@ from sagemaker.workflow.conditions import ConditionGreaterThanOrEqualTo
 from sagemaker.workflow.condition_step import ConditionStep
 
 # Import preprocessing function
-from preprocessing import preprocess_and_upload
+from preprocess import preprocess_and_upload
 
 
 def get_pipeline_session(region, default_bucket):
