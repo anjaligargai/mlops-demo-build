@@ -131,7 +131,7 @@ def get_pipeline(
     # Conditions and retry flow
     # -------------------------
     f1_metric = JsonGet(
-        step=step_evaluation,
+        step=step_evaluation.name,
         property_file=evaluation_report,
         json_path="classification_metrics.weighted_f1.value"
     )
