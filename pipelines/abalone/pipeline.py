@@ -10,12 +10,8 @@ import subprocess, sys
 subprocess.check_call([sys.executable, "-m", "pip", "install", "scikit-learn", "--quiet"])
 
 import boto3
-import pandas as pd
-from io import StringIO
-from sklearn.model_selection import train_test_split
-from sagemaker import AutoML, AutoMLInput, get_execution_role
-from sagemaker import MetricsSource, ModelMetrics
-from sagemaker.workflow.functions import Join
+from sagemaker import AutoML, AutoMLInput, get_execution_role, MetricsSource, ModelMetrics
+from sagemaker.workflow.functions import Join, JsonGet
 from sagemaker.processing import ProcessingOutput, ProcessingInput
 from sagemaker.sklearn.processing import SKLearnProcessor
 from sagemaker.transformer import Transformer
@@ -28,13 +24,11 @@ from sagemaker.workflow.properties import PropertyFile
 from sagemaker.workflow.steps import ProcessingStep, TransformStep
 from sagemaker.workflow.conditions import ConditionGreaterThanOrEqualTo
 from sagemaker.workflow.condition_step import ConditionStep
-from sagemaker.workflow.functions import JsonGet
-from sagemaker.workflow.condition_step import JsonGet
-from sagemaker.automl.automl import AutoML
 
-# --------------------------------------------------------------------------
-# Helper
-# --------------------------------------------------------------------------
+# Import preprocessing function
+from preprocessing import preprocess_and_upload
+
+
 def get_pipeline_session(region, default_bucket):
     boto_session = boto3.Session(region_name=region)
     sagemaker_client = boto_session.client("sagemaker")
@@ -42,9 +36,7 @@ def get_pipeline_session(region, default_bucket):
         boto_session=boto_session, sagemaker_client=sagemaker_client, default_bucket=default_bucket
     )
 
-# --------------------------------------------------------------------------
-# Pipeline definition
-# --------------------------------------------------------------------------
+
 def get_pipeline(
     region,
     role,
@@ -55,7 +47,6 @@ def get_pipeline(
     base_job_prefix="mlops_dine",
     sagemaker_project_name="mlops_dine_demo"
 ):
-
     pipeline_session = get_pipeline_session(region, default_bucket)
     if role is None:
         role = get_execution_role()
@@ -72,61 +63,28 @@ def get_pipeline(
     target_attribute_name = ParameterString(name="TargetAttributeName", default_value="customer churn")
 
     # -------------------------
-    # Dataset 1 (base dataset)
+    # Preprocessing (separate file)
     # -------------------------
     raw_dataset_s3 = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data/dataset1_20k.csv"
-    bucket = raw_dataset_s3.split("/")[2]
-    key = "/".join(raw_dataset_s3.split("/")[3:])
+    s3_paths = preprocess_and_upload(raw_dataset_s3, output_prefix)
 
-    s3 = boto3.client("s3")
-    obj = s3.get_object(Bucket=bucket, Key=key)
-    df = pd.read_csv(StringIO(obj["Body"].read().decode("utf-8")))
-
-    feature_names = [
-        "date","store_id","store_name","city","state","store_type",
-        "item_id","item_name","category","price","quantity_sold",
-        "revenue","food_cost","profit","day_of_week","month",
-        "quarter","is_weekend","is_holiday","temperature","is_promotion",
-        "stock_out","prep_time","calories","is_vegetarian",
-    ]
-    target_col = target_attribute_name.default_value
-    df.columns = feature_names + [target_col]
-
-    # split
-    train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
-    train_df.to_csv("train_val.csv", index=False)
-    test_df[feature_names].to_csv("x_test.csv", index=False, header=False)
-    test_df[[target_col]].to_csv("y_test.csv", index=False, header=False)
-
-    # upload
-    prepared_prefix = f"{output_prefix}/prepared"
-    train_val_s3_key = f"{prepared_prefix}/train_val.csv"
-    x_test_s3_key = f"{prepared_prefix}/x_test/x_test.csv"
-    y_test_s3_key = f"{prepared_prefix}/y_test/y_test.csv"
-
-    s3.upload_file("train_val.csv", bucket, train_val_s3_key)
-    s3.upload_file("x_test.csv", bucket, x_test_s3_key)
-    s3.upload_file("y_test.csv", bucket, y_test_s3_key)
-
-    s3_train_val = f"s3://{bucket}/{train_val_s3_key}"
-    s3_x_test_prefix = f"s3://{bucket}/{prepared_prefix}/x_test/"
-    s3_y_test = f"s3://{bucket}/{y_test_s3_key}"
+    s3_train_val = s3_paths["s3_train_val"]
+    s3_x_test_prefix = s3_paths["s3_x_test_prefix"]
+    s3_y_test = s3_paths["s3_y_test"]
 
     # -------------------------
     # Step 1: AutoML training
     # -------------------------
-    
     automl = AutoML(
         role=role,
-        target_attribute_name=target_col,
+        target_attribute_name=target_attribute_name.default_value,
         sagemaker_session=pipeline_session,
         total_job_runtime_in_seconds=max_automl_runtime,
-        mode="ENSEMBLING" 
+        mode="ENSEMBLING"
     )
-    
     step_auto_ml_training = AutoMLStep(
         name="AutoMLTrainingStep",
-        step_args=automl.fit(inputs=[AutoMLInput(inputs=s3_train_val, target_attribute_name=target_col)])
+        step_args=automl.fit(inputs=[AutoMLInput(inputs=s3_train_val, target_attribute_name=target_attribute_name.default_value)])
     )
 
     # create model
@@ -170,101 +128,36 @@ def get_pipeline(
     )
 
     # -------------------------
-    # Condition 1 → Retry if F1 < threshold
+    # Conditions and retry flow
     # -------------------------
     f1_metric = JsonGet(
-    step=step_evaluation,
-    property_file=evaluation_report,
-    json_path="classification_metrics.weighted_f1.value"
+        step=step_evaluation,
+        property_file=evaluation_report,
+        json_path="classification_metrics.weighted_f1.value"
     )
-    
-    # Condition
     cond_f1_first = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
 
     automl_retry = AutoML(
         role=role,
-        target_attribute_name=target_col,
+        target_attribute_name=target_attribute_name.default_value,
         sagemaker_session=pipeline_session,
         total_job_runtime_in_seconds=max_automl_runtime,
         mode="ENSEMBLING",
     )
-    
     step_automl_retry = AutoMLStep(
         name="AutoMLRetryStep",
-        step_args=automl_retry.fit(inputs=[AutoMLInput(inputs=s3_train_val, target_attribute_name=target_col)])
+        step_args=automl_retry.fit(inputs=[AutoMLInput(inputs=s3_train_val, target_attribute_name=target_attribute_name.default_value)])
     )
 
     step_cond_first = ConditionStep(
         name="CheckF1ScoreFirst",
         conditions=[cond_f1_first],
-        if_steps=[],        # register model later
+        if_steps=[],
         else_steps=[step_automl_retry],
     )
 
     # -------------------------
-    # Retry evaluation (Option 1 flow)
-    # -------------------------
-    retry_model = step_automl_retry.get_best_auto_ml_model(role, sagemaker_session=pipeline_session)
-    step_create_model_retry = ModelStep(name="ModelCreationStepRetry", step_args=retry_model.create(instance_type=instance_type))
-    transformer_retry = Transformer(
-        model_name=step_create_model_retry.properties.ModelName,
-        instance_count=instance_count,
-        instance_type=instance_type,
-        output_path=Join(on="/", values=["s3:/", s3_bucket_param, output_prefix, "transform_retry"]),
-        sagemaker_session=pipeline_session,
-    )
-    step_batch_transform_retry = TransformStep(
-        name="BatchTransformStepRetry",
-        step_args=transformer_retry.transform(data=s3_x_test_prefix, content_type="text/csv"),
-    )
-    step_eval_retry = ProcessingStep(
-        name="ModelEvaluationStepRetry",
-        step_args=sklearn_processor.run(
-            inputs=[
-                ProcessingInput(source=step_batch_transform_retry.properties.TransformOutput.S3OutputPath,
-                                destination="/opt/ml/processing/input/predictions"),
-                ProcessingInput(source=s3_y_test, destination="/opt/ml/processing/input/true_labels"),
-            ],
-            outputs=[ProcessingOutput(output_name="evaluation_metrics", source="/opt/ml/processing/evaluation",
-                                      destination=Join(on="/", values=["s3:/", s3_bucket_param, output_prefix, "evaluation_retry"]))],
-            code="pipelines/abalone/evalution.py",
-        ),
-        property_files=[evaluation_report],
-    )
-
-    # -------------------------
-    # Condition 2 → Retry if F1 < threshold
-    # -------------------------
-    f1_metric = JsonGet(
-    step=step_evaluation,
-    property_file=evaluation_report,
-    json_path="classification_metrics.weighted_f1.value"
-    )
-    
-    # Condition
-    cond_f1_retry = ConditionGreaterThanOrEqualTo(f1_metric, 0.8)
-
-
-    # Option 2: new dataset
-    new_data_s3 = "s3://aishwarya-mlops-demo/dine_customer_churn/dine_data/dataset1_10k.csv"
-    automl_new_data = AutoML(
-        role=role, target_attribute_name=target_col, sagemaker_session=pipeline_session,
-        total_job_runtime_in_seconds=7200, mode="ENSEMBLING"
-    )
-    step_automl_new_data = AutoMLStep(
-        name="AutoMLNewDataStep",
-        step_args=automl_new_data.fit(inputs=[AutoMLInput(inputs=new_data_s3, target_attribute_name=target_col)])
-    )
-
-    step_cond_retry = ConditionStep(
-        name="CheckF1ScoreRetry",
-        conditions=[cond_f1_retry],
-        if_steps=[],        # register model later
-        else_steps=[step_automl_new_data],
-    )
-
-    # -------------------------
-    # Register Model (common)
+    # Register Model
     # -------------------------
     model_metrics = ModelMetrics(
         model_statistics=MetricsSource(
@@ -291,8 +184,7 @@ def get_pipeline(
     # -------------------------
     steps = [
         step_auto_ml_training, step_create_model, step_batch_transform, step_evaluation,
-        step_cond_first, step_create_model_retry, step_batch_transform_retry, step_eval_retry, step_cond_retry,
-        step_register_model
+        step_cond_first, step_register_model
     ]
 
     return Pipeline(
