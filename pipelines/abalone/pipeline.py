@@ -350,3 +350,20 @@ def get_pipeline(
         steps=steps,
         sagemaker_session=pipeline_session,
     )
+
+if __name__ == "__main__":
+    pipeline = get_pipeline(
+        region="us-east-1",  # change if needed
+        role=None,           # will pick up default SageMaker execution role
+        default_bucket="aishwarya-mlops-demo",  # replace with your bucket
+    )
+    
+    # Register pipeline in SageMaker
+    pipeline.upsert(role_arn="arn:aws:iam::<your-account-id>:role/<your-sagemaker-execution-role>")
+    
+    # Start execution
+    import boto3
+    client = boto3.client("sagemaker", region_name="us-east-1")
+    response = client.start_pipeline_execution(pipelineName=pipeline.name)
+    print("Pipeline triggered. Execution ARN:")
+    print(response["PipelineExecutionArn"])
