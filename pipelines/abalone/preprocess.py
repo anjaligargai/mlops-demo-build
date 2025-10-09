@@ -1,60 +1,121 @@
-import boto3
-import pandas as pd
-import time
+
+"""Feature engineers the abalone dataset."""
+import argparse
+import logging
 import os
+import pathlib
+import requests
+import tempfile
 
-def fetch_data_from_athena(database, table, output_bucket, region="us-east-1", limit=10):
-    """Fetch data from Athena and return a pandas DataFrame."""
-    athena = boto3.client("athena", region_name=region)
+import boto3
+import numpy as np
+import pandas as pd
 
-    # SQL query
-    query = f"SELECT * FROM {table} LIMIT {limit}"
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 
-    # Start Athena query
-    response = athena.start_query_execution(
-        QueryString=query,
-        QueryExecutionContext={"Database": database},
-        ResultConfiguration={"OutputLocation": output_bucket},
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+logger.addHandler(logging.StreamHandler())
+
+
+# Since we get a headerless CSV file we specify the column names here.
+feature_columns_names = [
+    "sex",
+    "length",
+    "diameter",
+    "height",
+    "whole_weight",
+    "shucked_weight",
+    "viscera_weight",
+    "shell_weight",
+]
+label_column = "rings"
+
+feature_columns_dtype = {
+    "sex": str,
+    "length": np.float64,
+    "diameter": np.float64,
+    "height": np.float64,
+    "whole_weight": np.float64,
+    "shucked_weight": np.float64,
+    "viscera_weight": np.float64,
+    "shell_weight": np.float64,
+}
+label_column_dtype = {"rings": np.float64}
+
+
+def merge_two_dicts(x, y):
+    """Merges two dicts, returning a new copy."""
+    z = x.copy()
+    z.update(y)
+    return z
+
+
+if __name__ == "__main__":
+    logger.debug("Starting preprocessing.")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-data", type=str, required=True)
+    args = parser.parse_args()
+
+    base_dir = "/opt/ml/processing"
+    pathlib.Path(f"{base_dir}/data").mkdir(parents=True, exist_ok=True)
+    input_data = args.input_data
+    bucket = input_data.split("/")[2]
+    key = "/".join(input_data.split("/")[3:])
+
+    logger.info("Downloading data from bucket: %s, key: %s", bucket, key)
+    fn = f"{base_dir}/data/abalone-dataset.csv"
+    s3 = boto3.resource("s3")
+    s3.Bucket(bucket).download_file(key, fn)
+
+    logger.debug("Reading downloaded data.")
+    df = pd.read_csv(
+        fn,
+        header=None,
+        names=feature_columns_names + [label_column],
+        dtype=merge_two_dicts(feature_columns_dtype, label_column_dtype),
+    )
+    os.unlink(fn)
+
+    logger.debug("Defining transformers.")
+    numeric_features = list(feature_columns_names)
+    numeric_features.remove("sex")
+    numeric_transformer = Pipeline(
+        steps=[("imputer", SimpleImputer(strategy="median")), ("scaler", StandardScaler())]
     )
 
-    query_execution_id = response["QueryExecutionId"]
+    categorical_features = ["sex"]
+    categorical_transformer = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="constant", fill_value="missing")),
+            ("onehot", OneHotEncoder(handle_unknown="ignore")),
+        ]
+    )
 
-    # Wait for completion
-    while True:
-        status = athena.get_query_execution(QueryExecutionId=query_execution_id)
-        state = status["QueryExecution"]["Status"]["State"]
-        if state in ["SUCCEEDED", "FAILED", "CANCELLED"]:
-            break
-        time.sleep(2)
+    preprocess = ColumnTransformer(
+        transformers=[
+            ("num", numeric_transformer, numeric_features),
+            ("cat", categorical_transformer, categorical_features),
+        ]
+    )
 
-    if state != "SUCCEEDED":
-        raise Exception(f"Athena query failed with state: {state}")
+    logger.info("Applying transforms.")
+    y = df.pop("rings")
+    X_pre = preprocess.fit_transform(df)
+    y_pre = y.to_numpy().reshape(len(y), 1)
 
-    # Construct result path
-    result_path = f"{output_bucket}{query_execution_id}.csv"
-    print("Query completed. Download the result from:", result_path)
+    X = np.concatenate((y_pre, X_pre), axis=1)
 
-    # Load CSV to pandas
-    df = pd.read_csv(result_path)
-    return df
+    logger.info("Splitting %d rows of data into train, validation, test datasets.", len(X))
+    np.random.shuffle(X)
+    train, validation, test = np.split(X, [int(0.7 * len(X)), int(0.85 * len(X))])
 
-
-def preprocess_and_upload(bucket, prefix, region="us-east-1"):
-    """Preprocess data: fetch from Athena, clean, and upload to S3."""
-    database = "dine_demo_mlops"  # Replace with your Glue DB
-    table = "dine_data2"
-    output_bucket = "s3://aishwarya-mlops-demo/dine_customer_churn/temp/"
-
-    # Fetch Athena data
-    df = fetch_data_from_athena(database, table, output_bucket, region)
-
-    # Example preprocessing (customize as needed)
-    df = df.dropna()  # remove nulls
-    df.to_csv("preprocessed.csv", index=False)
-
-    # Upload to S3
-    s3 = boto3.client("s3", region_name=region)
-    s3.upload_file("preprocessed.csv", bucket, f"{prefix}/preprocessed.csv")
-
-    print(f"Preprocessed data uploaded to s3://{bucket}/{prefix}/preprocessed.csv")
-    return f"s3://{bucket}/{prefix}/preprocessed.csv"
+    logger.info("Writing out datasets to %s.", base_dir)
+    pd.DataFrame(train).to_csv(f"{base_dir}/train/train.csv", header=False, index=False)
+    pd.DataFrame(validation).to_csv(
+        f"{base_dir}/validation/validation.csv", header=False, index=False
+    )
+    pd.DataFrame(test).to_csv(f"{base_dir}/test/test.csv", header=False, index=False)
